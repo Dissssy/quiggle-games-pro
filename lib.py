@@ -1,3 +1,4 @@
+from attr import dataclass
 import hikari
 import zlib
 import base64
@@ -164,8 +165,9 @@ def current_timestamp() -> int:
     return int(datetime.datetime.now().timestamp())
 
 
+@dataclass
 class RefreshMessage:
-    pass
+    resend: bool = False
 
 
 def number_emoji(n: int) -> str:
