@@ -5,6 +5,13 @@ import random
 import elo
 
 
+def game_name(command_name: bool = False) -> str:
+    name = "Tic Tac Toe"
+    if command_name:
+        return name.lower().replace(" ", "")
+    return name
+
+
 def setup(
     bot: hikari.GatewayBot, client: lightbulb.Client, elo_handler: elo.EloHandler
 ) -> None:

@@ -214,6 +214,19 @@ def application_emoji(name: str) -> str:
     return fallback(name)
 
 
+game_names = {}
+
+
+def set_game_name(game_code: str, name: str) -> None:
+    global game_names
+    game_names[game_code] = name
+
+
+def get_game_name(game_code: str) -> str:
+    global game_names
+    return game_names.get(game_code, "Unknown Game")
+
+
 def fallback(name: str) -> str:
     print(f"Falling back for emoji: {name}")
     return ":x:"

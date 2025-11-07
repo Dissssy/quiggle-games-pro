@@ -171,7 +171,7 @@ class EloGame:
         for game_name, _ in all_games:
             score = elo_handler.get_elo_from_table(self.target, game_name)
             if score is not None:
-                description += f"**{game_name}**: {score}"
+                description += f"**{lib.get_game_name(game_name)}**: {score}"
                 if score > elo.default_elo:
                     percent_diff = (score - elo.default_elo) / elo.default_elo * 100
                     if percent_diff <= 1:

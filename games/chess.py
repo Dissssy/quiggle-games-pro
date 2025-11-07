@@ -6,6 +6,13 @@ import chess
 import elo
 
 
+def game_name(command_name: bool = False) -> str:
+    name = "Chess"
+    if command_name:
+        return name.lower().replace(" ", "")
+    return name
+
+
 def setup(
     bot: hikari.GatewayBot, client: lightbulb.Client, elo_handler: elo.EloHandler
 ) -> None:

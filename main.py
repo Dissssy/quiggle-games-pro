@@ -36,6 +36,14 @@ for filename in os.listdir("games"):
         if hasattr(module, "setup"):
             if callable(module.setup):
                 module.setup(bot, client, elo.EloHandler(db=db, game_name=game_name))
+                try:
+                    readable_name = module.game_name()
+                    print(f"Loaded game: {readable_name}")
+                    lib.set_game_name(game_code=game_name, name=readable_name)
+                except AttributeError:
+                    print(
+                        f"Loaded game module: {module_name} (no game_name function found)"
+                    )
             else:
                 raise TypeError(f"The setup in {module_name} is not callable.")
         else:
