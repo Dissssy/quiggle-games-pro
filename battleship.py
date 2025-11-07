@@ -2,9 +2,12 @@ import lightbulb
 import hikari
 import lib
 import random
+import elo
 
 
-def setup(bot: hikari.GatewayBot, client: lightbulb.Client) -> None:
+def setup(
+    bot: hikari.GatewayBot, client: lightbulb.Client, elo_handler: elo.EloHandler
+) -> None:
     @client.register()
     class BattleshipCommand(
         lightbulb.MessageCommand,

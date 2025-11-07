@@ -146,7 +146,21 @@ def extract_header(content: str) -> str | None:
 
 
 class Tie:
-    pass
+    def __init__(self, player1_id: hikari.Snowflake, player2_id: hikari.Snowflake):
+        self.player1_id = player1_id
+        self.player2_id = player2_id
+
+
+class Win:
+    def __init__(self, *, winner_id: hikari.Snowflake, loser_id: hikari.Snowflake):
+        self.winner_id = winner_id
+        self.loser_id = loser_id
+
+
+class Forfeit:
+    def __init__(self, *, winner_id: hikari.Snowflake, forfeiter_id: hikari.Snowflake):
+        self.winner_id = winner_id
+        self.forfeiter_id = forfeiter_id
 
 
 def admins() -> list[hikari.Snowflake]:
@@ -203,3 +217,8 @@ def application_emoji(name: str) -> str:
 def fallback(name: str) -> str:
     print(f"Falling back for emoji: {name}")
     return ":x:"
+
+
+def get_username(user: hikari.User) -> str:
+    # get the pretty username of the user, otherwise fall back to their full actual username
+    return user.global_name or user.username

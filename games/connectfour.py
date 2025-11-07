@@ -2,9 +2,12 @@ import lightbulb
 import hikari
 import lib
 import random
+import elo
 
 
-def setup(bot: hikari.GatewayBot, client: lightbulb.Client) -> None:
+def setup(
+    bot: hikari.GatewayBot, client: lightbulb.Client, elo_handler: elo.EloHandler
+) -> None:
     @client.register()
     class ConnectFourCommand(
         lightbulb.MessageCommand,
@@ -21,6 +24,12 @@ def setup(bot: hikari.GatewayBot, client: lightbulb.Client) -> None:
             if message.author.is_bot:
                 await ctx.respond("Bots cannot play games.", ephemeral=True)
                 return
+            user = message.author
+            elo_handler.store_user_data(
+                user_id=user.id,
+                username=lib.get_username(user),
+                avatar_url=user.display_avatar_url or user.default_avatar_url,
+            )
             if message.author.id == ctx.user.id:
                 await ctx.respond("You cannot play against yourself!", ephemeral=True)
                 return
@@ -33,6 +42,43 @@ def setup(bot: hikari.GatewayBot, client: lightbulb.Client) -> None:
             await ctx.respond(
                 f"{header}{ctx.user.mention} has challenged {message.author.mention} to a game of Connect Four!",
                 user_mentions=[ctx.user.id, message.author.id],
+                components=invite.components(bot),
+            )
+
+    @client.register()
+    class ConnectFourSlashCommand(
+        lightbulb.SlashCommand,
+        name="connectfour",
+        description="Start a game of Connect Four!",
+    ):
+        target = lightbulb.user(
+            "target",
+            "The user to challenge to a game of Connect Four.",
+        )
+
+        @lightbulb.invoke
+        async def invoke(self, ctx: lightbulb.Context) -> None:
+            user = self.target or ctx.user
+            if user.is_bot:
+                await ctx.respond("Bots cannot play games.", ephemeral=True)
+                return
+            elo_handler.store_user_data(
+                user_id=user.id,
+                username=lib.get_username(user),
+                avatar_url=user.display_avatar_url or user.default_avatar_url,
+            )
+            if user.id == ctx.user.id:
+                await ctx.respond("You cannot play against yourself!", ephemeral=True)
+                return
+            invite = lib.GameInvite(
+                inviter_id=ctx.user.id,
+                invited_id=user.id,
+                game_name="Connect Four",
+            )
+            header = invite.to_header()
+            await ctx.respond(
+                f"{header}{ctx.user.mention} has challenged {user.mention} to a game of Connect Four!",
+                user_mentions=[ctx.user.id, user.id],
                 components=invite.components(bot),
             )
 
@@ -64,47 +110,71 @@ def setup(bot: hikari.GatewayBot, client: lightbulb.Client) -> None:
                 except ValueError:
                     print("Invalid column in c4_move_ interaction id:", custom_id)
                     return
-                if c4_game.make_move(event.interaction.user.id, col):
-                    winner = c4_game.check_winner()
-                    if winner is None:
+                resp = c4_game.make_move(event.interaction.user.id, col, elo_handler)
+                if isinstance(resp, bool):
+                    if resp:
+                        outcome = c4_game.check_outcome()
+                        if outcome is None:
+                            await bot.rest.create_interaction_response(
+                                interaction=event.interaction,
+                                response_type=hikari.ResponseType.MESSAGE_UPDATE,
+                                content=c4_game.content(),
+                                embeds=c4_game.embeds(),
+                                components=c4_game.components(bot),
+                                token=event.interaction.token,
+                            )
+                            return
+                        if isinstance(outcome, lib.Tie):
+                            await bot.rest.create_interaction_response(
+                                interaction=event.interaction,
+                                response_type=hikari.ResponseType.MESSAGE_UPDATE,
+                                content=f"{c4_game.to_empty_header()}The game is a tie!",
+                                embeds=c4_game.embeds(),
+                                components=c4_game.components(bot),
+                                token=event.interaction.token,
+                            )
+                            return
+                        if isinstance(outcome, lib.Win):
+                            await bot.rest.create_interaction_response(
+                                interaction=event.interaction,
+                                response_type=hikari.ResponseType.MESSAGE_UPDATE,
+                                content=f"{c4_game.to_empty_header()}<@{outcome.winner_id}> has won the game!",
+                                embeds=c4_game.embeds(),
+                                components=c4_game.components(bot),
+                                token=event.interaction.token,
+                            )
+                            return
+                        if isinstance(outcome, lib.Forfeit):
+                            await bot.rest.create_interaction_response(
+                                interaction=event.interaction,
+                                response_type=hikari.ResponseType.MESSAGE_UPDATE,
+                                content=f"{c4_game.to_empty_header()}<@{outcome.winner_id}> has won the game by forfeit!",
+                                embeds=c4_game.embeds(),
+                                components=c4_game.components(bot),
+                                token=event.interaction.token,
+                            )
+                            return
+                    else:
                         await bot.rest.create_interaction_response(
-                            interaction=event.interaction,
-                            response_type=hikari.ResponseType.MESSAGE_UPDATE,
-                            content=c4_game.content(),
-                            embeds=c4_game.embeds(),
-                            components=c4_game.components(bot),
-                            token=event.interaction.token,
+                            event.interaction,
+                            event.interaction.token,
+                            hikari.ResponseType.MESSAGE_CREATE,
+                            "Invalid move.",
+                            flags=hikari.MessageFlag.EPHEMERAL,
                         )
-                        return
-                    if isinstance(winner, lib.Tie):
-                        await bot.rest.create_interaction_response(
-                            interaction=event.interaction,
-                            response_type=hikari.ResponseType.MESSAGE_UPDATE,
-                            content=f"{c4_game.to_empty_header()}The game is a tie!",
-                            embeds=c4_game.embeds(),
-                            components=c4_game.components(bot),
-                            token=event.interaction.token,
-                        )
-                        return
-                    if isinstance(winner, hikari.Snowflake):
-                        await bot.rest.create_interaction_response(
-                            interaction=event.interaction,
-                            response_type=hikari.ResponseType.MESSAGE_UPDATE,
-                            content=f"{c4_game.to_empty_header()}<@{winner}> has won the game!",
-                            embeds=c4_game.embeds(),
-                            components=c4_game.components(bot),
-                            token=event.interaction.token,
-                        )
-                        return
-                else:
+                    return
+                elif isinstance(resp, lib.MaybeEphemeral):
                     await bot.rest.create_interaction_response(
                         event.interaction,
                         event.interaction.token,
                         hikari.ResponseType.MESSAGE_CREATE,
-                        "Invalid move.",
-                        flags=hikari.MessageFlag.EPHEMERAL,
+                        resp.message,
+                        flags=hikari.MessageFlag.EPHEMERAL if resp.ephemeral else None,
                     )
-                return
+                    return
+                else:
+                    print("Invalid response from make_move:", resp)
+                    return
             elif custom_id == "c4_quiggle":
                 await bot.rest.create_interaction_response(
                     event.interaction,
@@ -146,11 +216,13 @@ class ConnectFourGame:
         self.board = [[" " for _ in range(7)] for _ in range(6)]
         self.current_turn = current_turn or self.player_r
 
-    def make_move(self, player: hikari.Snowflake, col: int) -> bool:
+    def make_move(
+        self, player: hikari.Snowflake, col: int, elo_handler: elo.EloHandler
+    ) -> bool:
         if player in lib.admins():
             player = self.current_turn
         if self.current_turn != player:
-            return False
+            return lib.MaybeEphemeral("It's not your turn!", ephemeral=True)
 
         for row in reversed(range(6)):
             if self.board[row][col] == " ":
@@ -161,6 +233,9 @@ class ConnectFourGame:
         self.current_turn = (
             self.player_y if self.current_turn == self.player_r else self.player_r
         )
+        outcome = self.check_outcome()
+        if outcome is not None:
+            elo_handler.record_outcome(outcome)
         return True
 
     def get_all_winning_positions(self) -> list[tuple[int, int]]:
@@ -216,16 +291,16 @@ class ConnectFourGame:
                     )
         return winning_positions
 
-    def check_winner(self) -> hikari.Snowflake | lib.Tie | None:
+    def check_outcome(self) -> lib.Win | lib.Tie | lib.Forfeit | None:
         winning_positions = self.get_all_winning_positions()
         if winning_positions:
             winner_piece = self.board[winning_positions[0][0]][winning_positions[0][1]]
             if winner_piece == "R":
-                return self.player_r
+                return lib.Win(winner_id=self.player_r, loser_id=self.player_y)
             else:
-                return self.player_y
+                return lib.Win(winner_id=self.player_y, loser_id=self.player_r)
         elif all(cell != " " for row in self.board for cell in row):
-            return lib.Tie()
+            return lib.Tie(self.player_r, self.player_y)
         else:
             return None
 
@@ -278,7 +353,7 @@ class ConnectFourGame:
 
     def components(self, bot: hikari.GatewayBot) -> list:
         rows = []
-        if self.check_winner() is not None:
+        if self.check_outcome() is not None:
             return rows
         row = bot.rest.build_message_action_row()
         for c in range(4):

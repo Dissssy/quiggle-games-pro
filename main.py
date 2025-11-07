@@ -4,6 +4,7 @@ import lightbulb
 import os
 import sys
 import lib
+import elo
 
 dotenv.load_dotenv()
 
@@ -25,17 +26,22 @@ bot.subscribe(hikari.StartingEvent, client.start)
 
 import importlib
 
+db = elo.init_db()
+
 for filename in os.listdir("games"):
     if filename.endswith(".py") and not filename.startswith("__"):
-        module_name = f"games.{filename[:-3]}"
+        game_name = filename[:-3]
+        module_name = f"games.{game_name}"
         module = importlib.import_module(module_name)
         if hasattr(module, "setup"):
             if callable(module.setup):
-                module.setup(bot, client)
+                module.setup(bot, client, elo.EloHandler(db=db, game_name=game_name))
             else:
                 raise TypeError(f"The setup in {module_name} is not callable.")
         else:
             raise AttributeError(f"No setup function found in {module_name}.")
+
+handler = elo.EloHandler(db=db, game_name="elo")
 
 
 @bot.listen()
@@ -47,6 +53,19 @@ async def on_ready(event: hikari.StartedEvent) -> None:
     lib.set_application_emojis(parsed)
     print(f"Successfully loaded {len(emojis)} emojis.")
     print(lib.application_emoji("quiggle"))
+
+
+@bot.listen(hikari.InteractionCreateEvent)
+async def on_interaction(event: hikari.InteractionCreateEvent) -> None:
+    # attempt to cache the authors username and profile picture on any interaction
+    user = event.interaction.user
+    if user is not None:
+        if not user.is_bot:
+            handler.store_user_data(
+                user_id=user.id,
+                username=lib.get_username(user),
+                avatar_url=user.display_avatar_url or user.default_avatar_url,
+            )
 
 
 if __name__ == "__main__":

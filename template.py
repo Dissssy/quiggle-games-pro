@@ -5,14 +5,21 @@ import random
 import elo
 
 
+def game_name(command_name: bool = False) -> str:
+    name = "Template"
+    if command_name:
+        return name.lower().replace(" ", "")
+    return name
+
+
 def setup(
     bot: hikari.GatewayBot, client: lightbulb.Client, elo_handler: elo.EloHandler
 ) -> None:
     @client.register()
-    class TicTacToeCommand(
+    class Command(
         lightbulb.MessageCommand,
-        name="tictactoe",
-        description="Start a game of Tic Tac Toe!",
+        name=game_name(command_name=True),
+        description=f"Start a game of {game_name()}!",
     ):
         @lightbulb.invoke
         async def invoke(self, ctx: lightbulb.Context) -> None:
@@ -36,24 +43,24 @@ def setup(
             invite = lib.GameInvite(
                 inviter_id=ctx.user.id,
                 invited_id=message.author.id,
-                game_name="Tic Tac Toe",
+                game_name=game_name(),
             )
             header = invite.to_header()
             await ctx.respond(
-                f"{header}{ctx.user.mention} has challenged {message.author.mention} to a game of Tic Tac Toe!",
+                f"{header}{ctx.user.mention} has challenged {message.author.mention} to a game of {game_name()}!",
                 user_mentions=[ctx.user.id, message.author.id],
                 components=invite.components(bot),
             )
 
     @client.register()
-    class TicTacToeSlashCommand(
+    class SlashCommand(
         lightbulb.SlashCommand,
-        name="tictactoe",
-        description="Start a game of Tic Tac Toe!",
+        name=game_name.lower(),
+        description=f"Start a game of {game_name()}!",
     ):
         target = lightbulb.user(
             "target",
-            "The user to challenge to a game of Tic Tac Toe.",
+            f"The user to challenge to a game of {game_name()}.",
         )
 
         @lightbulb.invoke
@@ -73,11 +80,11 @@ def setup(
             invite = lib.GameInvite(
                 inviter_id=ctx.user.id,
                 invited_id=user.id,
-                game_name="Tic Tac Toe",
+                game_name=game_name(),
             )
             header = invite.to_header()
             await ctx.respond(
-                f"{header}{ctx.user.mention} has challenged {user.mention} to a game of Tic Tac Toe!",
+                f"{header}{ctx.user.mention} has challenged {user.mention} to a game of {game_name()}!",
                 user_mentions=[ctx.user.id, user.id],
                 components=invite.components(bot),
             )
@@ -90,34 +97,49 @@ def setup(
         if message is None:
             return
         content = message.content
-        game_name = lib.header_name(content)
-        if game_name != "Tic Tac Toe" and game_name != "TicTacToe":
+        parsed_name = lib.header_name(content)
+        if parsed_name != f"{game_name()}":
             return
         invite = lib.GameInvite.from_header(content)
         if invite is None:
 
-            ttt_game = TicTacToeGame.from_header(content)
-            if ttt_game is None:
+            game = Game.from_header(content)
+            if game is None:
                 return
             custom_id = event.interaction.custom_id
-            if custom_id.startswith("ttt_move_"):
+            if custom_id.startswith(f"{game_name()}_move_"):
                 parts = custom_id.split("_")
-                if len(parts) != 4:
-                    print("Invalid ttt_move_ interaction id:", custom_id)
+                # if len(parts) != 4:
+                #     print(f"Invalid {game_name()}_move_ interaction id:", custom_id)
+                #     return
+                # try:
+                #     row = int(parts[2])
+                #     col = int(parts[3])
+                # except ValueError:
+                #     return
+                response = game.make_move(event.interaction.user.id, elo_handler)
+                if isinstance(response, lib.MaybeEphemeral):
+                    await bot.rest.create_interaction_response(
+                        event.interaction,
+                        event.interaction.token,
+                        hikari.ResponseType.MESSAGE_CREATE,
+                        response.message,
+                        flags=(
+                            hikari.MessageFlag.EPHEMERAL
+                            if response.ephemeral
+                            else hikari.MessageFlag.NONE
+                        ),
+                    )
                     return
-                try:
-                    row = int(parts[2])
-                    col = int(parts[3])
-                except ValueError:
-                    return
-                if ttt_game.make_move(event.interaction.user.id, row, col, elo_handler):
-                    outcome = ttt_game.check_outcome()
+                elif isinstance(response, bool) and response:
+                    outcome = game.check_outcome()
                     if outcome is None:
                         await bot.rest.create_interaction_response(
                             interaction=event.interaction,
                             response_type=hikari.ResponseType.MESSAGE_UPDATE,
-                            content=ttt_game.content(),
-                            components=ttt_game.components(bot),
+                            content=game.content(),
+                            components=game.components(bot),
+                            embeds=game.embeds(),
                             token=event.interaction.token,
                         )
                         return
@@ -125,8 +147,9 @@ def setup(
                         await bot.rest.create_interaction_response(
                             interaction=event.interaction,
                             response_type=hikari.ResponseType.MESSAGE_UPDATE,
-                            content=f"{ttt_game.to_empty_header()}The game is a tie!",
-                            components=ttt_game.components(bot),
+                            content=f"{game.to_empty_header()}The game is a tie!",
+                            components=game.components(bot),
+                            embeds=game.embeds(),
                             token=event.interaction.token,
                         )
                         return
@@ -134,8 +157,9 @@ def setup(
                         await bot.rest.create_interaction_response(
                             interaction=event.interaction,
                             response_type=hikari.ResponseType.MESSAGE_UPDATE,
-                            content=f"{ttt_game.to_empty_header()}<@{outcome.winner_id}> has won the game!",
-                            components=ttt_game.components(bot),
+                            content=f"{game.to_empty_header()}<@{outcome.winner_id}> has won the game!",
+                            components=game.components(bot),
+                            embeds=game.embeds(),
                             token=event.interaction.token,
                         )
                         return
@@ -143,8 +167,9 @@ def setup(
                         await bot.rest.create_interaction_response(
                             interaction=event.interaction,
                             response_type=hikari.ResponseType.MESSAGE_UPDATE,
-                            content=f"{ttt_game.to_empty_header()}<@{outcome.winner_id}> has won the game by forfeit!",
-                            components=ttt_game.components(bot),
+                            content=f"{game.to_empty_header()}<@{outcome.winner_id}> has won the game by forfeit!",
+                            components=game.components(bot),
+                            embeds=game.embeds(),
                             token=event.interaction.token,
                         )
                         return
@@ -161,21 +186,22 @@ def setup(
             if await invite.handle_interaction(event, bot):
 
                 if random.choice([True, False]):
-                    ttt_game = TicTacToeGame(invite.invited_id, invite.inviter_id)
+                    game = Game(invite.invited_id, invite.inviter_id)
                 else:
-                    ttt_game = TicTacToeGame(invite.inviter_id, invite.invited_id)
+                    game = Game(invite.inviter_id, invite.invited_id)
 
                 await bot.rest.create_interaction_response(
                     interaction=event.interaction,
                     response_type=hikari.ResponseType.MESSAGE_UPDATE,
-                    content=ttt_game.content(),
-                    components=ttt_game.components(bot),
+                    content=game.content(),
+                    components=game.components(bot),
+                    embeds=game.embeds(),
                     token=event.interaction.token,
                 )
                 return
 
 
-class TicTacToeGame:
+class Game:
     def __init__(
         self,
         player_1: hikari.Snowflake,
@@ -189,15 +215,15 @@ class TicTacToeGame:
         self.current_turn = current_turn or self.player_x
 
     def make_move(
-        self, player: hikari.Snowflake, row: int, col: int, elo_handler: elo.EloHandler
-    ) -> bool:
+        self, player: hikari.Snowflake, elo_handler: elo.EloHandler
+    ) -> bool | lib.MaybeEphemeral:
         if player in lib.admins():
             player = self.current_turn
         if self.current_turn != player:
-            return False
-        if self.board[row][col] != " ":
-            return False
-        self.board[row][col] = "X" if player == self.player_x else "O"
+            return lib.MaybeEphemeral("It's not your turn!", ephemeral=True)
+        # game logic
+
+        # change turn
         self.current_turn = (
             self.player_o if self.current_turn == self.player_x else self.player_x
         )
@@ -207,65 +233,38 @@ class TicTacToeGame:
         return True
 
     def check_outcome(self) -> lib.Win | lib.Tie | lib.Forfeit | None:
-        winner = None
-        for i in range(3):
-            if self.board[i][0] == self.board[i][1] == self.board[i][2] != " ":
-                winner = self.player_x if self.board[i][0] == "X" else self.player_o
-            if self.board[0][i] == self.board[1][i] == self.board[2][i] != " ":
-                winner = self.player_x if self.board[0][i] == "X" else self.player_o
-        if self.board[0][0] == self.board[1][1] == self.board[2][2] != " ":
-            winner = self.player_x if self.board[0][0] == "X" else self.player_o
-        if self.board[0][2] == self.board[1][1] == self.board[2][0] != " ":
-            winner = self.player_x if self.board[0][2] == "X" else self.player_o
-        if all(cell != " " for row in self.board for cell in row):
-            return lib.Tie(self.player_x, self.player_o)
-        if winner is not None:
-            return lib.Win(
-                winner_id=winner,
-                loser_id=(self.player_o if winner == self.player_x else self.player_x),
-            )
+        # game logic to check for win/tie
         return None
 
     def content(self) -> str:
         header = self.to_header()
         return f"{header}It is <@{self.current_turn}>'s turn! ({'X' if self.current_turn == self.player_x else 'O'})"
 
+    def embeds(self) -> list[hikari.Embed]:
+        embeds = []
+        # game logic to create embeds
+        return embeds
+
     def components(self, bot: hikari.GatewayBot) -> list:
-        override_disable = self.check_outcome() is not None
+        # override_disable = self.check_outcome() is not None
         rows = []
-        for r in range(3):
-            row = bot.rest.build_message_action_row()
-            for c in range(3):
-                label = self.board[r][c] if self.board[r][c] != " " else "-"
-                color = hikari.components.ButtonStyle.SECONDARY
-                if self.board[r][c] == "X":
-                    color = hikari.components.ButtonStyle.PRIMARY
-                elif self.board[r][c] == "O":
-                    color = hikari.components.ButtonStyle.DANGER
-                row.add_interactive_button(
-                    color,
-                    f"ttt_move_{r}_{c}",
-                    label=label,
-                    is_disabled=(self.board[r][c] != " ") or override_disable,
-                )
-            rows.append(row)
+        # game logic to create components
         return rows
 
     def to_header(self) -> str:
         game_data = {
-            "player_x": str(self.player_x),
-            "player_o": str(self.player_o),
-            "board": self.board,
+            "player_1": str(self.player_x),
+            "player_2": str(self.player_o),
             "current_turn": str(self.current_turn),
         }
         game_data = lib.serialize(game_data)
-        return f"```{game_data}\nTic Tac Toe\n```"
+        return f"```{game_data}\n{game_name()}\n```"
 
     def to_empty_header(self) -> str:
-        return f"```Tic Tac Toe```"
+        return f"```{game_name()}```"
 
     @staticmethod
-    def from_header(content: str) -> "TicTacToeGame | None":
+    def from_header(content: str) -> "Game | None":
         header = lib.extract_header(content)
         if header is None:
             return None
@@ -278,12 +277,11 @@ class TicTacToeGame:
             dict_data = lib.deserialize(game_data)
             if dict_data is None:
                 return None
-            game = TicTacToeGame(
-                player_1=hikari.Snowflake(dict_data["player_x"]),
-                player_2=hikari.Snowflake(dict_data["player_o"]),
+            game = Game(
+                player_1=hikari.Snowflake(dict_data["player_1"]),
+                player_2=hikari.Snowflake(dict_data["player_2"]),
                 current_turn=hikari.Snowflake(dict_data["current_turn"]),
             )
-            game.board = dict_data["board"]
             return game
         except Exception:
             return None
