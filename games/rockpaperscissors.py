@@ -42,13 +42,13 @@ def setup(
                 return
             invite = lib.GameInvite(
                 inviter_id=ctx.user.id,
-                invited_id=message.author.id,
+                invited_id=user.id if user is not None else None,
                 game_name=game_name(),
+                game_display_name=game_name(),
             )
-            header = invite.to_header()
             await ctx.respond(
-                f"{header}{ctx.user.mention} has challenged {message.author.mention} to a game of {game_name()}!",
-                user_mentions=[ctx.user.id, message.author.id],
+                invite.content(),
+                user_mentions=invite.user_mentions(),
                 components=invite.components(bot),
             )
 
@@ -58,34 +58,38 @@ def setup(
         name=game_name(command_name=True),
         description=f"Start a game of {game_name()}!",
     ):
-        target = lightbulb.user(
-            "target",
+        opponent = lightbulb.user(
+            "opponent",
             f"The user to challenge to a game of {game_name()}.",
+            default=None,  # Support posting an open challenge
         )
 
         @lightbulb.invoke
         async def invoke(self, ctx: lightbulb.Context) -> None:
-            user = self.target or ctx.user
-            if user.is_bot:
-                await ctx.respond("Bots cannot play games.", ephemeral=True)
-                return
-            elo_handler.store_user_data(
-                user_id=user.id,
-                username=lib.get_username(user),
-                avatar_url=user.display_avatar_url or user.default_avatar_url,
-            )
-            if user.id == ctx.user.id:
-                await ctx.respond("You cannot play against yourself!", ephemeral=True)
-                return
+            user = self.opponent
+            if user is not None:
+                if user.is_bot:
+                    await ctx.respond("Bots cannot play games.", ephemeral=True)
+                    return
+                elo_handler.store_user_data(
+                    user_id=user.id,
+                    username=lib.get_username(user),
+                    avatar_url=user.display_avatar_url or user.default_avatar_url,
+                )
+                if user.id == ctx.user.id:
+                    await ctx.respond(
+                        "You cannot play against yourself!", ephemeral=True
+                    )
+                    return
             invite = lib.GameInvite(
                 inviter_id=ctx.user.id,
-                invited_id=user.id,
+                invited_id=user.id if user is not None else None,
                 game_name=game_name(),
+                game_display_name=game_name(),
             )
-            header = invite.to_header()
             await ctx.respond(
-                f"{header}{ctx.user.mention} has challenged {user.mention} to a game of {game_name()}!",
-                user_mentions=[ctx.user.id, user.id],
+                invite.content(),
+                user_mentions=invite.user_mentions(),
                 components=invite.components(bot),
             )
 

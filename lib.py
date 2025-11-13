@@ -9,12 +9,19 @@ import datetime
 
 class GameInvite:
     def __init__(
-        self, inviter_id: hikari.Snowflake, invited_id: hikari.Snowflake, game_name: str
+        self,
+        inviter_id: hikari.Snowflake,
+        invited_id: hikari.Snowflake | None,
+        game_name: str,
+        game_display_name: str,
+        options: dict | None = None,
     ):
         self.inviter_id = inviter_id
         self.invited_id = invited_id
         self.target_game_name = game_name
+        self.target_game_display_name = game_display_name
         self.game_name = "Invitation"
+        self.options = options or {}
 
     @staticmethod
     def from_header(content: str) -> "GameInvite | None":
@@ -31,18 +38,28 @@ class GameInvite:
             dict_data = deserialize(game_data)
             if dict_data is None:
                 return None
+            invited = dict_data.get("invited_id")
+            if invited == "None":
+                invited = None
+            if invited is not None:
+                invited = hikari.Snowflake(invited)
             return GameInvite(
                 inviter_id=hikari.Snowflake(dict_data["inviter_id"]),
-                invited_id=hikari.Snowflake(dict_data["invited_id"]),
+                invited_id=invited,
                 game_name=target_game_name,
+                game_display_name=dict_data.get("game_display_name", target_game_name),
+                options=dict_data.get("options"),
             )
-        except Exception:
+        except Exception as e:
+            # print(f"Error deserializing GameInvite from header: {e}")
             return None
 
     def to_header(self) -> str:
         data = {
             "inviter_id": str(self.inviter_id),
             "invited_id": str(self.invited_id),
+            "game_display_name": self.target_game_display_name,
+            "options": self.options,
         }
         serialized_data = serialize(data)
         header = f"```{serialized_data}\n{self.target_game_name}\n```"
@@ -50,9 +67,32 @@ class GameInvite:
 
     def components(self, bot: hikari.GatewayBot) -> list:
         row = bot.rest.build_message_action_row()
-        row.add_interactive_button(3, "invite_accept", label="Accept")
-        row.add_interactive_button(4, "invite_decline", label="Decline")
+        if self.invited_id is None:
+            row.add_interactive_button(
+                hikari.components.ButtonStyle.SUCCESS,
+                "invite_accept",
+                label="Join",
+            )
+        else:
+            row.add_interactive_button(
+                hikari.components.ButtonStyle.SUCCESS, "invite_accept", label="Accept"
+            )
+            row.add_interactive_button(
+                hikari.components.ButtonStyle.DANGER, "invite_decline", label="Decline"
+            )
         return [row]
+
+    def content(self) -> str:
+        if self.invited_id is None:
+            return f"{self.to_header()}<@{self.inviter_id}> has invited anyone to play **{self.target_game_display_name}**!"
+        else:
+            return f"{self.to_header()}<@{self.inviter_id}> has invited <@{self.invited_id}> to play **{self.target_game_display_name}**!"
+
+    def user_mentions(self) -> list[hikari.Snowflake]:
+        mentions = [self.inviter_id]
+        if self.invited_id is not None:
+            mentions.append(self.invited_id)
+        return mentions
 
     async def handle_interaction(
         self, event: hikari.InteractionCreateEvent, bot: hikari.GatewayBot
@@ -69,18 +109,22 @@ class GameInvite:
                 flags=hikari.MessageFlag.EPHEMERAL,
             )
             return False
-        if (
-            event.interaction.user.id != self.invited_id
-            and event.interaction.user.id not in admins()
-        ):
-            await bot.rest.create_interaction_response(
-                event.interaction,
-                event.interaction.token,
-                hikari.ResponseType.MESSAGE_CREATE,
-                "You are not invited to this game.",
-                flags=hikari.MessageFlag.EPHEMERAL,
-            )
-            return False
+        if self.invited_id is not None:
+            if (
+                event.interaction.user.id != self.invited_id
+                and event.interaction.user.id not in admins()
+            ):
+                await bot.rest.create_interaction_response(
+                    event.interaction,
+                    event.interaction.token,
+                    hikari.ResponseType.MESSAGE_CREATE,
+                    "You are not invited to this game.",
+                    flags=hikari.MessageFlag.EPHEMERAL,
+                )
+                return False
+        else:
+            self.invited_id = event.interaction.user.id
+
         custom_id = event.interaction.custom_id
 
         if custom_id == "invite_accept":
@@ -90,7 +134,14 @@ class GameInvite:
 
             message = event.interaction.message
             if message is not None:
-                await message.delete()
+                await bot.rest.create_interaction_response(
+                    event.interaction,
+                    event.interaction.token,
+                    hikari.ResponseType.MESSAGE_UPDATE,
+                    "The game invite has been declined.",
+                    components=[],
+                    embeds=message.embeds,
+                )
             return False
         await bot.rest.create_interaction_response(
             event.interaction,
@@ -229,7 +280,7 @@ def get_game_name(game_code: str) -> str:
 
 def fallback(name: str) -> str:
     print(f"Falling back for emoji: {name}")
-    return ":x:"
+    return "❌"
 
 
 def get_username(user: hikari.User) -> str:

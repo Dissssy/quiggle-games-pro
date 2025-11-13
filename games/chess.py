@@ -13,6 +13,15 @@ def game_name(command_name: bool = False) -> str:
     return name
 
 
+valid_chess_variants = {
+    "standard": "Standard",
+    "chesskers": "Chesskers",
+    "chess960": "Chess 960",
+    "vertichess": "Vertichess",
+    "gravitychess": "Gravity Chess",
+}
+
+
 def setup(
     bot: hikari.GatewayBot, client: lightbulb.Client, elo_handler: elo.EloHandler
 ) -> None:
@@ -42,13 +51,13 @@ def setup(
                 return
             invite = lib.GameInvite(
                 inviter_id=ctx.user.id,
-                invited_id=message.author.id,
-                game_name="Chess",
+                invited_id=user.id if user is not None else None,
+                game_name=game_name(),
+                game_display_name=game_name(),
             )
-            header = invite.to_header()
             await ctx.respond(
-                f"{header}{ctx.user.mention} has challenged {message.author.mention} to a game of Chess!",
-                user_mentions=[ctx.user.id, message.author.id],
+                invite.content(),
+                user_mentions=invite.user_mentions(),
                 components=invite.components(bot),
             )
 
@@ -58,34 +67,68 @@ def setup(
         name="chess",
         description="Start a game of Chess!",
     ):
-        target = lightbulb.user(
-            "target",
+        opponent = lightbulb.user(
+            "opponent",
             "The user to challenge to a game of Chess.",
+            default=None,  # Support posting an open challenge
+        )
+
+        variant = lightbulb.string(
+            "variant",
+            "The game variant to play.",
+            # choices={"Standard": "standard", "Chesskers": "chesskers"},
+            choices=[
+                # lightbulb.Choice("Standard", "standard"),
+                # lightbulb.Choice("Chesskers", "chesskers"),
+                lightbulb.Choice(name, key)
+                for key, name in valid_chess_variants.items()
+            ],
+            default="standard",
         )
 
         @lightbulb.invoke
         async def invoke(self, ctx: lightbulb.Context) -> None:
-            user = self.target or ctx.user
-            if user.is_bot:
-                await ctx.respond("Bots cannot play games.", ephemeral=True)
+            user = self.opponent
+            if user is not None:
+                if user.is_bot:
+                    await ctx.respond("Bots cannot play games.", ephemeral=True)
+                    return
+                elo_handler.store_user_data(
+                    user_id=user.id,
+                    username=lib.get_username(user),
+                    avatar_url=user.display_avatar_url or user.default_avatar_url,
+                )
+                if user.id == ctx.user.id:
+                    await ctx.respond(
+                        "You cannot play against yourself!", ephemeral=True
+                    )
+                    return
+            if self.variant not in valid_chess_variants:
+                await ctx.respond(
+                    f"Invalid game variant selected.\n`{self.variant}`", ephemeral=True
+                )
                 return
-            elo_handler.store_user_data(
-                user_id=user.id,
-                username=lib.get_username(user),
-                avatar_url=user.display_avatar_url or user.default_avatar_url,
-            )
-            if user.id == ctx.user.id:
-                await ctx.respond("You cannot play against yourself!", ephemeral=True)
-                return
+            # invite = lib.GameInvite(
+            #     inviter_id=ctx.user.id,
+            #     invited_id=user.id,
+            #     game_name="Chess",
+            #     options={"variant": self.variant},
+            # )
+            # header = invite.to_header()
+            # await ctx.respond(
+            #     f"{header}{ctx.user.mention} has challenged {user.mention} to a game of Chess{f' ({self.variant.capitalize()})' if self.variant != 'standard' else ''}!",
+            #     user_mentions=[ctx.user.id, user.id],
+            #     components=invite.components(bot),
+            # )
             invite = lib.GameInvite(
                 inviter_id=ctx.user.id,
-                invited_id=user.id,
-                game_name="Chess",
+                invited_id=user.id if user is not None else None,
+                game_name=game_name(),
+                game_display_name=f"{game_name()}{f' ({valid_chess_variants[self.variant]})' if self.variant != 'standard' else ''}",
             )
-            header = invite.to_header()
             await ctx.respond(
-                f"{header}{ctx.user.mention} has challenged {user.mention} to a game of Chess!",
-                user_mentions=[ctx.user.id, user.id],
+                invite.content(),
+                user_mentions=invite.user_mentions(),
                 components=invite.components(bot),
             )
 
@@ -209,11 +252,16 @@ def setup(
                 return
         else:
             if await invite.handle_interaction(event, bot):
+                variant = invite.options.get("variant", "standard")
 
                 if random.choice([True, False]):
-                    chess_game = ChessGame(invite.invited_id, invite.inviter_id)
+                    white = invite.inviter_id
+                    black = invite.invited_id
                 else:
-                    chess_game = ChessGame(invite.inviter_id, invite.invited_id)
+                    white = invite.invited_id
+                    black = invite.inviter_id
+
+                chess_game = ChessGame(white, black, variant=variant)
 
                 await bot.rest.create_interaction_response(
                     interaction=event.interaction,
@@ -233,17 +281,41 @@ class ChessGame:
         player_2: hikari.Snowflake,
         *,
         current_turn: hikari.Snowflake | None = None,
+        variant: str = "standard",
     ) -> None:
         self.player_w = player_1
         self.player_b = player_2
         self.selected_piece = None
-        self.board = chess.Board()
+        # print(f"Initializing chess game in variant: {variant}")
+        match variant:
+            case "standard":
+                self.board = chess.Board()
+            case "chesskers":
+                self.board = chess.Board(
+                    fen="r1b1k1n1/1n1q1b1r/p1p1p1p1/1p1p1p1p/1P1P1P1P/P1P1P1P1/1N1Q1B1R/R1B1K1N1 w KQkq - 0 1"  # chess pieces in a checkerboard pattern
+                )
+            case "chess960":
+                self.board = chess.Board.from_chess960_pos(
+                    scharnagl=random.randint(0, 959)  # WTF IS A SCHARNAGL???
+                )
+            case "vertichess":
+                self.board = chess.Board(
+                    fen="RP4pr/NP4pn/BP4pb/QP4pq/KP4pk/BP4pb/NP4pn/RP4pr w - - 0 1"  # vertical chess starting position
+                )
+            case "gravitychess":
+                self.board = (
+                    chess.Board()
+                )  # standard board, will be rendered rotated 90 degrees (gravity will move pieces "down" the board which will functionally move them to the right)
+            case _:
+                raise ValueError(f"Invalid chess variant: {variant}")
+
         self.current_turn = current_turn or self.player_w
         self.force_win = None
         # self.last_move = None
         self.last_fen = None
         self.undo_vote = None
         self.truce_offer = None
+        self.variant = variant
 
     def make_move(
         self,
@@ -319,10 +391,13 @@ class ChessGame:
                     return lib.MaybeEphemeral("Invalid promotion piece.", True)
                 uci_move = f"{self.selected_piece}{to_square}{chess.piece_symbol(promotion_piece).lower()}"
                 move = chess.Move.from_uci(uci_move.lower())
-                if move not in self.board.legal_moves:
+                # if move not in self.board.legal_moves:
+                if not self.legal_move(move):
                     return lib.MaybeEphemeral("Illegal move.", True)
                 self.last_fen = self.board.fen()
                 self.board.push(move)
+                if self.variant == "gravitychess":
+                    self.apply_gravity()
                 self.selected_piece = None
                 # self.last_move = uci_move.upper()
                 self.current_turn = (
@@ -334,10 +409,12 @@ class ChessGame:
             else:
                 uci_move = f"{self.selected_piece}{to_square}"
                 move = chess.Move.from_uci(uci_move.lower())
-                if move not in self.board.legal_moves:
+                if not self.legal_move(move):
                     return lib.MaybeEphemeral("Illegal move.", True)
                 self.last_fen = self.board.fen()
                 self.board.push(move)
+                if self.variant == "gravitychess":
+                    self.apply_gravity()
                 self.selected_piece = None
                 # self.last_move = uci_move.upper()
                 self.current_turn = (
@@ -359,7 +436,10 @@ class ChessGame:
             # self.force_win = (
             #     self.player_b if self.current_turn == self.player_w else self.player_w
             # )
-            self.force_win = lib.Forfeit(forfeiter_id=player)
+            self.force_win = lib.Forfeit(
+                forfeiter_id=player,
+                winner_id=(self.player_b if player == self.player_w else self.player_w),
+            )
         elif command_parts[0] == "undo":
             # return lib.MaybeEphemeral("This doesnt actually work yet", True)
             if self.last_fen is None:
@@ -434,7 +514,9 @@ class ChessGame:
             #     ),
             # )
             return self.force_win
-        if self.board.is_checkmate():
+        if (
+            self.board.is_checkmate() or self.get_moves() == {}
+        ):  # handle variant losses as well
             # return (
             #     self.player_b if self.current_turn == self.player_w else self.player_w
             # )
@@ -482,41 +564,168 @@ class ChessGame:
         if self.board.is_checkmate():
             # special rendering for checkmate that renders the cause of checkmate
             return self.render_checkmate_board()
-        force_red = []
+        selected_moves = []
         if self.selected_piece is not None:
             moves = self.get_moves()
             for to_square in moves.get(self.selected_piece, []):
-                force_red.append(to_square)
-        last_moved = None
+                selected_moves.append(to_square)
+        last_moved_to = None
+        last_moved_from = None
         if self.last_move() is not None:
             uci = self.last_move()[2:4]
             # convert to 0-indexed file/rank
             file = ord(uci[0]) - ord("A")
             rank = int(uci[1]) - 1
-            last_moved = (file, rank)
+            last_moved_to = (file, rank)
+            uci_from = self.last_move()[0:2]
+            file_from = ord(uci_from[0]) - ord("A")
+            rank_from = int(uci_from[1]) - 1
+            last_moved_from = (file_from, rank_from)
         board_str = ""
         for rank in range(8, 0, -1):
-            board_str += lib.number_emoji(rank)
+            if self.variant == "gravitychess":
+                board_str += lib.letter_emoji(9 - rank)
+            else:
+                board_str += lib.number_emoji(rank)
             for file in range(1, 9):
-                square_index = chess.square(file - 1, rank - 1)
+                if self.variant == "gravitychess":
+                    # rotate rank and file 90 degrees counterclockwise
+                    rotated_file = 8 - rank
+                    rotated_rank = file - 1
+                else:
+                    rotated_file = file - 1
+                    rotated_rank = rank - 1
+                square_index = chess.square(rotated_file, rotated_rank)
                 piece = self.board.piece_at(square_index)
                 board_str += str(
                     get_emoji(
-                        file - 1,
-                        rank - 1,
+                        rotated_file,
+                        rotated_rank,
                         piece,
-                        red=self.selected_piece is not None
-                        and chess.square_name(square_index).upper() in force_red,
-                        green=self.selected_piece
+                        # danger=self.selected_piece is not None
+                        # and chess.square_name(square_index).upper() in selected_moves,
+                        # info=self.selected_piece
+                        # == chess.square_name(square_index).upper(),
+                        # success=last_moved_to == (file - 1, rank - 1)
+                        # or last_moved_from == (file - 1, rank - 1),
+                        info=self.selected_piece is not None
+                        and chess.square_name(square_index).upper() in selected_moves,
+                        danger=self.selected_piece
                         == chess.square_name(square_index).upper(),
-                        blue=last_moved == (file - 1, rank - 1),
+                        success=(
+                            last_moved_to == (rotated_file, rotated_rank)
+                            or last_moved_from == (rotated_file, rotated_rank)
+                        )
+                        and self.force_win is None,
                     )
                 )
             board_str += "\n"
         board_str += lib.application_emoji("quiggle")
         for file in range(1, 9):
-            board_str += lib.letter_emoji(file)
+            if self.variant == "gravitychess":
+                board_str += lib.number_emoji(file)
+            else:
+                board_str += lib.letter_emoji(file)
         return board_str
+
+    def get_moves(self) -> dict[str, set[str]]:
+        if self.variant != "gravitychess":
+            moves = {}
+            for move in self.board.legal_moves:
+                uci_move = move.uci().upper()
+                from_square = uci_move[0:2]
+                to_square = uci_move[2:4]
+                if moves.get(from_square) is None:
+                    moves[from_square] = set()
+                moves[from_square].add(to_square)
+            return moves
+        else:
+            # we're gonna need to do a bit of custom move generation here since gravity chess has different rules
+            # we'll figure out all pseudo-legal moves, then modify them to get their FINAL positions after gravity applies, then check legality on those final positions
+            legal_moves = {}
+            for move in self.board.pseudo_legal_moves:
+                # simulate the move on a copy of the board
+                temp_board = self.board.copy()
+                temp_board.push(move)
+                # apply gravity: for each piece on the board, move it down (to the right) until it hits another piece or the edge of the board, also change move to be the final position after gravity applies, dedup moves as needed
+                pieces_to_move = []
+                for square in chess.SQUARES:
+                    piece = temp_board.piece_at(square)
+                    if piece is not None:
+                        pieces_to_move.append((square, piece))
+                        temp_board.remove_piece_at(square)
+                for square, piece in pieces_to_move:
+                    file = chess.square_file(square)
+                    rank = chess.square_rank(square)
+                    while file < 7:
+                        next_square = chess.square(file + 1, rank)
+                        if temp_board.piece_at(next_square) is not None:
+                            break
+                        file += 1
+                    final_square = chess.square(file, rank)
+                    temp_board.set_piece_at(final_square, piece)
+                # now check if the move is legal on the modified board
+                if not temp_board.is_check():
+                    # move is legal, adjust the move to be the final position after gravity applies
+                    move_file = chess.square_file(move.to_square)
+                    move_rank = chess.square_rank(move.to_square)
+                    while move_file < 7:
+                        next_square = chess.square(move_file + 1, move_rank)
+                        if self.board.piece_at(next_square) is not None:
+                            break
+                        move_file += 1
+                    final_to_square = chess.square(move_file, move_rank)
+                    final_uci = f"{chess.square_name(move.from_square).upper()}{chess.square_name(final_to_square).upper()}"
+                    uci_move = final_uci.upper()
+                    from_square = uci_move[0:2]
+                    to_square = uci_move[2:4]
+                    if legal_moves.get(from_square) is None:
+                        legal_moves[from_square] = set()
+                    if to_square not in legal_moves[from_square]:
+                        legal_moves[from_square].add(to_square)
+            # remove any moves that result in the piece going immediately to the left of itself (this will cause no net movement after gravity) unless the horizontal position is changed (i.e. captures or vertical moves)
+            new_legal_moves = {}
+            for from_square, to_squares in legal_moves.items():
+                new_to_squares = set()
+                from_file = ord(from_square[0]) - ord("A")
+                from_rank = int(from_square[1]) - 1
+                for to_square in to_squares:
+                    to_file = ord(to_square[0]) - ord("A")
+                    to_rank = int(to_square[1]) - 1
+                    if to_file != from_file - 1 or to_rank != from_rank:
+                        new_to_squares.add(to_square)
+                if len(new_to_squares) > 0:
+                    new_legal_moves[from_square] = new_to_squares
+            return new_legal_moves
+
+    def legal_move(self, move: chess.Move) -> bool:
+        legal_moves = self.get_moves()
+        uci_move = move.uci().upper()
+        from_square = uci_move[0:2]
+        to_square = uci_move[2:4]
+        return to_square in legal_moves.get(from_square, set())
+
+    def apply_gravity(self) -> None:
+        # move any piece with a space to its right, repeat until no pieces are moved
+        while True:
+            pieces_moved = False
+            all_pieces = []
+            for square in chess.SQUARES:
+                piece = self.board.piece_at(square)
+                if piece is not None:
+                    all_pieces.append((square, piece))
+            for square, piece in all_pieces:
+                file = chess.square_file(square)
+                rank = chess.square_rank(square)
+                if file < 7:
+                    next_square = chess.square(file + 1, rank)
+                    if self.board.piece_at(next_square) is None:
+                        # move piece to next square
+                        self.board.remove_piece_at(square)
+                        self.board.set_piece_at(next_square, piece)
+                        pieces_moved = True
+            if not pieces_moved:
+                break
 
     def render_checkmate_board(self) -> str:
         # find the king in check
@@ -551,23 +760,37 @@ class ChessGame:
                     red_squares.add(chess.square(f, r))
         board_str = ""
         for rank in range(8, 0, -1):
-            board_str += lib.number_emoji(rank)
+            if self.variant == "gravitychess":
+                board_str += lib.letter_emoji(9 - rank)
+            else:
+                board_str += lib.number_emoji(rank)
             for file in range(1, 9):
-                square_index = chess.square(file - 1, rank - 1)
+                if self.variant == "gravitychess":
+                    # rotate rank and file 90 degrees counterclockwise
+                    rotated_file = 8 - rank
+                    rotated_rank = file - 1
+                else:
+                    rotated_file = file - 1
+                    rotated_rank = rank - 1
+                square_index = chess.square(rotated_file, rotated_rank)
                 piece = self.board.piece_at(square_index)
                 board_str += str(
                     get_emoji(
-                        file - 1,
-                        rank - 1,
+                        rotated_file,
+                        rotated_rank,
                         piece,
-                        red=square_index in red_squares or square_index == king_square,
-                        green=square_index in attackers,
+                        danger=square_index in red_squares
+                        or square_index == king_square,
+                        success=square_index in attackers,
                     )
                 )
             board_str += "\n"
         board_str += lib.application_emoji("quiggle")
         for file in range(1, 9):
-            board_str += lib.letter_emoji(file)
+            if self.variant == "gravitychess":
+                board_str += lib.number_emoji(file)
+            else:
+                board_str += lib.letter_emoji(file)
         return board_str
 
     def components(self, bot: hikari.GatewayBot) -> list:
@@ -811,17 +1034,6 @@ class ChessGame:
                     return True
         return False
 
-    def get_moves(self) -> dict:
-        moves = {}
-        for move in self.board.legal_moves:
-            uci_move = move.uci().upper()
-            from_square = uci_move[0:2]
-            to_square = uci_move[2:4]
-            if moves.get(from_square) is None:
-                moves[from_square] = set()
-            moves[from_square].add(to_square)
-        return moves
-
     def to_header(self) -> str:
         game_data = {
             "player_w": str(self.player_w),
@@ -835,6 +1047,7 @@ class ChessGame:
             "move_stack": [move_to_string(m) for m in self.board.move_stack],
             "undo_vote": str(self.undo_vote),
             "truce_offer": str(self.truce_offer),
+            "variant": self.variant,
         }
         game_data = lib.serialize(game_data)
         return f"```{game_data}\nChess\n```"
@@ -860,6 +1073,7 @@ class ChessGame:
                 player_1=hikari.Snowflake(dict_data["player_w"]),
                 player_2=hikari.Snowflake(dict_data["player_b"]),
                 current_turn=hikari.Snowflake(dict_data["current_turn"]),
+                variant=dict_data.get("variant", "standard"),
             )
             game.board = chess.Board(fen=dict_data["board"])
             game.selected_piece = dict_data["selected_piece"]
@@ -903,29 +1117,29 @@ def get_emoji(
     y: int,
     piece: chess.PieceType | None,
     *,
-    red: bool = False,
-    green: bool = False,
-    blue: bool = False,
+    danger: bool = False,
+    success: bool = False,
+    info: bool = False,
 ) -> hikari.Emoji:
     is_black_square = (x + y) % 2 == 1
     square_color = "black" if is_black_square else "red"
     if piece is None:
 
         if square_color == "black":
-            if red:
+            if danger:
                 return lib.application_emoji("green_danger")
-            elif green:
+            elif success:
                 return lib.application_emoji("green_green")
-            elif blue:
+            elif info:
                 return lib.application_emoji("green_blue")
             else:
                 return lib.application_emoji("green")
         elif square_color == "red":
-            if red:
+            if danger:
                 return lib.application_emoji("white_danger")
-            elif green:
+            elif success:
                 return lib.application_emoji("white_green")
-            elif blue:
+            elif info:
                 return lib.application_emoji("white_blue")
             else:
                 return lib.application_emoji("white")
@@ -936,11 +1150,11 @@ def get_emoji(
     symbol = piece.symbol().upper()
     background = "g" if is_black_square else "w"
     emoji_name = f"{color}{symbol}{background}"
-    if red:
+    if danger:
         emoji_name += "_danger"
-    elif green:
+    elif success:
         emoji_name += "_green"
-    elif blue:
+    elif info:
         emoji_name += "_blue"
     return lib.application_emoji(emoji_name)
 
