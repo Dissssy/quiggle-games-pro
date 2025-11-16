@@ -2,8 +2,34 @@ from sqlite3 import Connection, Cursor
 import sqlite3
 from typing import Optional
 import lib
+import hikari
 
 default_elo = 1200
+
+
+class Change:
+    def __init__(
+        self, result: lib.Win | lib.Tie | lib.Forfeit, elomap: dict[int, dict[str, int]]
+    ):
+        self.result = result
+        self.elomap = elomap
+
+    def get_new_elo(self, user_id: int) -> Optional[int]:
+        if user_id in self.elomap:
+            return self.elomap[user_id]["new_elo"]
+        return None
+
+    def get_old_elo(self, user_id: int) -> Optional[int]:
+        if user_id in self.elomap:
+            return self.elomap[user_id]["old_elo"]
+        return None
+
+    def get_elo_change(self, user_id: int) -> Optional[int]:
+        new_elo = self.get_new_elo(user_id)
+        old_elo = self.get_old_elo(user_id)
+        if new_elo is not None and old_elo is not None:
+            return new_elo - old_elo
+        return None
 
 
 # Abstract handler for Elo rating system, to be used in ALL zero-sum quiggle games.
@@ -80,7 +106,7 @@ class EloHandler:
         else:
             return None
 
-    def record_outcome(self, result: lib.Win | lib.Tie | lib.Forfeit) -> None:
+    def record_outcome(self, result: lib.Win | lib.Tie | lib.Forfeit) -> Change:
         if isinstance(result, lib.Win):
             winner_elo = self.get_elo(result.winner_id)
             loser_elo = self.get_elo(result.loser_id)
@@ -92,6 +118,17 @@ class EloHandler:
 
             self._set_elo(result.winner_id, new_winner_elo)
             self._set_elo(result.loser_id, new_loser_elo)
+            elomap = {
+                result.winner_id: {
+                    "old_elo": winner_elo,
+                    "new_elo": new_winner_elo,
+                },
+                result.loser_id: {
+                    "old_elo": loser_elo,
+                    "new_elo": new_loser_elo,
+                },
+            }
+            return Change(result, elomap)
         elif isinstance(result, lib.Tie):
             player1_elo = self.get_elo(result.player1_id)
             player2_elo = self.get_elo(result.player2_id)
@@ -105,6 +142,17 @@ class EloHandler:
 
             self._set_elo(result.player1_id, new_player1_elo)
             self._set_elo(result.player2_id, new_player2_elo)
+            elomap = {
+                result.player1_id: {
+                    "old_elo": player1_elo,
+                    "new_elo": new_player1_elo,
+                },
+                result.player2_id: {
+                    "old_elo": player2_elo,
+                    "new_elo": new_player2_elo,
+                },
+            }
+            return Change(result, elomap)
         elif isinstance(result, lib.Forfeit):
             # dont penalize a forfeiter as heavily as a normal loss
             winner_elo = self.get_elo(result.winner_id)
@@ -117,6 +165,19 @@ class EloHandler:
 
             self._set_elo(result.winner_id, new_winner_elo)
             self._set_elo(result.forfeiter_id, new_forfeiter_elo)
+            elomap = {
+                result.winner_id: {
+                    "old_elo": winner_elo,
+                    "new_elo": new_winner_elo,
+                },
+                result.forfeiter_id: {
+                    "old_elo": forfeiter_elo,
+                    "new_elo": new_forfeiter_elo,
+                },
+            }
+            return Change(result, elomap)
+        else:
+            raise ValueError("Invalid result type")
 
 
 def init_db(db_path: str = "elo_ratings.db") -> Connection:
@@ -144,3 +205,69 @@ def init_table(db: Connection, game_name: str) -> None:
         """
     )
     db.commit()
+
+
+def result_embeds(
+    change: Change,
+) -> list[hikari.Embed]:
+    result = change.result
+    if isinstance(result, lib.Win):
+        embed = hikari.Embed()
+        embed.add_field(
+            name="Winner",
+            value=f"<@{result.winner_id}>\n**Rating:**```ansi\n{change.get_new_elo(result.winner_id)} \u001b[1;32m(+{change.get_elo_change(result.winner_id)})\n```",
+            inline=True,
+        )
+        embed.add_field(
+            name="Loser",
+            value=f"<@{result.loser_id}>\n**Rating:**```ansi\n{change.get_new_elo(result.loser_id)} \u001b[1;31m({change.get_elo_change(result.loser_id)})\n```",
+            inline=True,
+        )
+    elif isinstance(result, lib.Tie):
+        embed = hikari.Embed(title="It's a tie!")
+        elo_color = (
+            "32"
+            if change.get_elo_change(result.player1_id) > 0
+            else "31" if change.get_elo_change(result.player1_id) < 0 else "33"
+        )
+        sign = "+" if change.get_elo_change(result.player1_id) > 0 else ""
+        embed.add_field(
+            name="Player 1",
+            value=f"<@{result.player1_id}>\n**Rating:**```ansi\n{change.get_new_elo(result.player1_id)} \u001b[1;{elo_color}m({sign}{change.get_elo_change(result.player1_id)})\n```",
+            inline=True,
+        )
+        elo_color = (
+            "32"
+            if change.get_elo_change(result.player2_id) > 0
+            else "31" if change.get_elo_change(result.player2_id) < 0 else "33"
+        )
+        sign = "+" if change.get_elo_change(result.player2_id) > 0 else ""
+        embed.add_field(
+            name="Player 2",
+            value=f"<@{result.player2_id}>\n**Rating:**```ansi\n{change.get_new_elo(result.player2_id)} \u001b[1;{elo_color}m({sign}{change.get_elo_change(result.player2_id)})\n```",
+            inline=True,
+        )
+    elif isinstance(result, lib.Forfeit):
+        embed = hikari.Embed(title="Forfeit!")
+        embed.add_field(
+            name="Winner",
+            value=f"<@{result.winner_id}>\n**Rating:**```ansi\n{change.get_new_elo(result.winner_id)} \u001b[1;32m(+{change.get_elo_change(result.winner_id)})\n```",
+            inline=True,
+        )
+        embed.add_field(
+            name="Forfeiter",
+            value=f"<@{result.forfeiter_id}>\n**Rating:**```ansi\n{change.get_new_elo(result.forfeiter_id)} \u001b[1;31m({change.get_elo_change(result.forfeiter_id)})\n```",
+            inline=True,
+        )
+    else:
+        raise ValueError("Invalid result type")
+
+    embed.set_author(
+        name="Match Result and Elo Update",
+        url="https://ko-fi.com/p51_dissy",
+        # icon="https://cdn.discordapp.com/avatars/156533151198478336/654883d7b36cf0b706a06a19581cd5fd.png?size=256",
+        # icon="https://zip.p51.nl/raw/5bc411bd-7995-4323-8c27-3633be7dffa2.png",
+        icon="https://zip.p51.nl/raw/85b61ffc-4788-480e-8f66-8fb2c3f73141.png",
+    )
+
+    return [embed]

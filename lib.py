@@ -250,9 +250,13 @@ application_emojis = {}
 
 def set_application_emojis(emojis: dict[str, str]) -> None:
     global application_emojis
-    print(f"Application emojis set:")
+    print(f"Application emojis set: ", end="")
+    first = True
     for key, value in emojis.items():
-        print(f"  {key}: {value}")
+        # print(f"  {key}: {value}")
+        print(f"{', ' if not first else ''}{key}", end="")
+        first = False
+    print()
     application_emojis = emojis
 
 

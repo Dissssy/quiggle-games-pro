@@ -121,44 +121,26 @@ def setup(
                     col = int(parts[3])
                 except ValueError:
                     return
-                if ttt_game.make_move(event.interaction.user.id, row, col, elo_handler):
-                    outcome = ttt_game.check_outcome()
-                    if outcome is None:
-                        await bot.rest.create_interaction_response(
-                            interaction=event.interaction,
-                            response_type=hikari.ResponseType.MESSAGE_UPDATE,
-                            content=ttt_game.content(),
-                            components=ttt_game.components(bot),
-                            token=event.interaction.token,
-                        )
-                        return
-                    if isinstance(outcome, lib.Tie):
-                        await bot.rest.create_interaction_response(
-                            interaction=event.interaction,
-                            response_type=hikari.ResponseType.MESSAGE_UPDATE,
-                            content=f"{ttt_game.to_empty_header()}The game is a tie!",
-                            components=ttt_game.components(bot),
-                            token=event.interaction.token,
-                        )
-                        return
-                    if isinstance(outcome, lib.Win):
-                        await bot.rest.create_interaction_response(
-                            interaction=event.interaction,
-                            response_type=hikari.ResponseType.MESSAGE_UPDATE,
-                            content=f"{ttt_game.to_empty_header()}<@{outcome.winner_id}> has won the game!",
-                            components=ttt_game.components(bot),
-                            token=event.interaction.token,
-                        )
-                        return
-                    if isinstance(outcome, lib.Forfeit):
-                        await bot.rest.create_interaction_response(
-                            interaction=event.interaction,
-                            response_type=hikari.ResponseType.MESSAGE_UPDATE,
-                            content=f"{ttt_game.to_empty_header()}<@{outcome.winner_id}> has won the game by forfeit!",
-                            components=ttt_game.components(bot),
-                            token=event.interaction.token,
-                        )
-                        return
+                response = ttt_game.make_move(
+                    event.interaction.user.id, row, col, elo_handler
+                )
+                if isinstance(response, bool) and response:
+                    await bot.rest.create_interaction_response(
+                        interaction=event.interaction,
+                        response_type=hikari.ResponseType.MESSAGE_UPDATE,
+                        content=ttt_game.content(),
+                        components=ttt_game.components(bot),
+                        token=event.interaction.token,
+                    )
+                elif isinstance(response, elo.Change):
+                    await bot.rest.create_interaction_response(
+                        interaction=event.interaction,
+                        response_type=hikari.ResponseType.MESSAGE_UPDATE,
+                        content=ttt_game.to_empty_header(),
+                        embeds=elo.result_embeds(response),
+                        components=ttt_game.components(bot),
+                        token=event.interaction.token,
+                    )
                 else:
                     await bot.rest.create_interaction_response(
                         event.interaction,
@@ -201,7 +183,7 @@ class TicTacToeGame:
 
     def make_move(
         self, player: hikari.Snowflake, row: int, col: int, elo_handler: elo.EloHandler
-    ) -> bool:
+    ) -> bool | elo.Change:
         if player in lib.admins():
             player = self.current_turn
         if self.current_turn != player:
@@ -214,7 +196,7 @@ class TicTacToeGame:
         )
         outcome = self.check_outcome()
         if outcome is not None:
-            elo_handler.record_outcome(outcome)
+            return elo_handler.record_outcome(outcome)
         return True
 
     def check_outcome(self) -> lib.Win | lib.Tie | lib.Forfeit | None:

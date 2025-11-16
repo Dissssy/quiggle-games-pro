@@ -19,6 +19,7 @@ valid_chess_variants = {
     "chess960": "Chess 960",
     "vertichess": "Vertichess",
     "gravitychess": "Gravity Chess",
+    "crossderby": "Cross Derby",
 }
 
 
@@ -125,6 +126,7 @@ def setup(
                 invited_id=user.id if user is not None else None,
                 game_name=game_name(),
                 game_display_name=f"{game_name()}{f' ({valid_chess_variants[self.variant]})' if self.variant != 'standard' else ''}",
+                options={"variant": self.variant},
             )
             await ctx.respond(
                 invite.content(),
@@ -152,63 +154,83 @@ def setup(
             custom_id = event.interaction.custom_id
             if custom_id.startswith("chess_"):
                 remainder = custom_id[len("chess_") :]
-                resp = chess_game.make_move(
+                response = chess_game.make_move(
                     event.interaction.user.id, remainder, event.interaction, elo_handler
                 )
-                if type(resp) == bool and resp:
-                    outcome = chess_game.check_outcome()
-                    if outcome is None:
-                        await bot.rest.create_interaction_response(
-                            interaction=event.interaction,
-                            response_type=hikari.ResponseType.MESSAGE_UPDATE,
-                            content=chess_game.content(),
-                            embeds=chess_game.embeds(),
-                            components=chess_game.components(bot),
-                            token=event.interaction.token,
-                        )
-                        return
-                    if isinstance(outcome, lib.Tie):
-                        await bot.rest.create_interaction_response(
-                            interaction=event.interaction,
-                            response_type=hikari.ResponseType.MESSAGE_UPDATE,
-                            content=f"{chess_game.to_empty_header()}The game is a tie!",
-                            embeds=chess_game.embeds(),
-                            components=chess_game.components(bot),
-                            token=event.interaction.token,
-                        )
-                        return
-                    if isinstance(outcome, lib.Win):
-                        content = f"{chess_game.to_empty_header()}<@{outcome.winner_id}> has won the game!"
-                        await bot.rest.create_interaction_response(
-                            interaction=event.interaction,
-                            response_type=hikari.ResponseType.MESSAGE_UPDATE,
-                            content=content,
-                            embeds=chess_game.embeds(),
-                            components=chess_game.components(bot),
-                            token=event.interaction.token,
-                        )
-                        return
-                    if isinstance(outcome, lib.Forfeit):
-                        content = f"{chess_game.to_empty_header()}<@{outcome.winner_id}> has won the game by forfeit!"
-                        await bot.rest.create_interaction_response(
-                            interaction=event.interaction,
-                            response_type=hikari.ResponseType.MESSAGE_UPDATE,
-                            content=content,
-                            embeds=chess_game.embeds(),
-                            components=chess_game.components(bot),
-                            token=event.interaction.token,
-                        )
-                        return
-                elif type(resp) == lib.MaybeEphemeral:
+                # if type(resp) == bool and resp:
+                #     outcome = chess_game.check_outcome()
+                #     if outcome is None:
+                #         await bot.rest.create_interaction_response(
+                #             interaction=event.interaction,
+                #             response_type=hikari.ResponseType.MESSAGE_UPDATE,
+                #             content=chess_game.content(),
+                #             embeds=chess_game.embeds(),
+                #             components=chess_game.components(bot),
+                #             token=event.interaction.token,
+                #         )
+                #         return
+                #     if isinstance(outcome, lib.Tie):
+                #         await bot.rest.create_interaction_response(
+                #             interaction=event.interaction,
+                #             response_type=hikari.ResponseType.MESSAGE_UPDATE,
+                #             content=f"{chess_game.to_empty_header()}The game is a tie!",
+                #             embeds=chess_game.embeds(),
+                #             components=chess_game.components(bot),
+                #             token=event.interaction.token,
+                #         )
+                #         return
+                #     if isinstance(outcome, lib.Win):
+                #         content = f"{chess_game.to_empty_header()}<@{outcome.winner_id}> has won the game!"
+                #         await bot.rest.create_interaction_response(
+                #             interaction=event.interaction,
+                #             response_type=hikari.ResponseType.MESSAGE_UPDATE,
+                #             content=content,
+                #             embeds=chess_game.embeds(),
+                #             components=chess_game.components(bot),
+                #             token=event.interaction.token,
+                #         )
+                #         return
+                #     if isinstance(outcome, lib.Forfeit):
+                #         content = f"{chess_game.to_empty_header()}<@{outcome.winner_id}> has won the game by forfeit!"
+                #         await bot.rest.create_interaction_response(
+                #             interaction=event.interaction,
+                #             response_type=hikari.ResponseType.MESSAGE_UPDATE,
+                #             content=content,
+                #             embeds=chess_game.embeds(),
+                #             components=chess_game.components(bot),
+                #             token=event.interaction.token,
+                #         )
+                #         return
+                if isinstance(response, bool) and response:
+                    await bot.rest.create_interaction_response(
+                        interaction=event.interaction,
+                        response_type=hikari.ResponseType.MESSAGE_UPDATE,
+                        content=chess_game.content(),
+                        embeds=chess_game.embeds(),
+                        components=chess_game.components(bot),
+                        token=event.interaction.token,
+                    )
+                    return
+                elif isinstance(response, elo.Change):
+                    await bot.rest.create_interaction_response(
+                        interaction=event.interaction,
+                        response_type=hikari.ResponseType.MESSAGE_UPDATE,
+                        content=f"{chess_game.to_empty_header()}",
+                        embeds=elo.result_embeds(response) + chess_game.embeds(),
+                        components=[],
+                        token=event.interaction.token,
+                    )
+                    return
+                elif isinstance(response, lib.MaybeEphemeral):
                     await bot.rest.create_interaction_response(
                         event.interaction,
                         event.interaction.token,
                         hikari.ResponseType.MESSAGE_CREATE,
-                        resp.message,
-                        flags=hikari.MessageFlag.EPHEMERAL if resp.ephemeral else 0,
+                        response.message,
+                        flags=hikari.MessageFlag.EPHEMERAL if response.ephemeral else 0,
                     )
-                elif type(resp) == lib.RefreshMessage:
-                    if resp.resend:
+                elif isinstance(response, lib.RefreshMessage):
+                    if response.resend:
                         # TODO: delete old message?
                         await bot.rest.create_interaction_response(
                             interaction=event.interaction,
@@ -252,6 +274,7 @@ def setup(
                 return
         else:
             if await invite.handle_interaction(event, bot):
+                # print(invite.options)
                 variant = invite.options.get("variant", "standard")
 
                 if random.choice([True, False]):
@@ -306,6 +329,10 @@ class ChessGame:
                 self.board = (
                     chess.Board()
                 )  # standard board, will be rendered rotated 90 degrees (gravity will move pieces "down" the board which will functionally move them to the right)
+            case "crossderby":
+                self.board = chess.Board(
+                    fen="n1nnnn1k/2pppp2/pp4pp/8/8/PP4PP/2PPPP2/K1NNNN1N w - - 0 1"  # cross derby starting position
+                )
             case _:
                 raise ValueError(f"Invalid chess variant: {variant}")
 
@@ -323,7 +350,7 @@ class ChessGame:
         remainder: str,
         interaction: hikari.PartialInteraction,
         elo_handler: elo.EloHandler,
-    ) -> bool | lib.MaybeEphemeral | lib.RefreshMessage:
+    ) -> bool | lib.MaybeEphemeral | lib.RefreshMessage | elo.Change:
         if player in lib.admins():
             player = self.current_turn
         command_parts = remainder.split("_")
@@ -502,7 +529,7 @@ class ChessGame:
             return lib.RefreshMessage()
         outcome = self.check_outcome()
         if outcome is not None:
-            elo_handler.record_outcome(outcome)
+            return elo_handler.record_outcome(outcome)
         return True
 
     def check_outcome(self) -> lib.Win | lib.Tie | lib.Forfeit | None:
@@ -588,6 +615,10 @@ class ChessGame:
             else:
                 board_str += lib.number_emoji(rank)
             for file in range(1, 9):
+                if (rank, file) in self.blank_squares():
+                    board_str += lib.application_emoji("blank")
+                    continue
+                # handle rotated board
                 if self.variant == "gravitychess":
                     # rotate rank and file 90 degrees counterclockwise
                     rotated_file = 8 - rank
@@ -628,75 +659,111 @@ class ChessGame:
                 board_str += lib.letter_emoji(file)
         return board_str
 
+    def blank_squares(self) -> set[tuple[int, int]]:
+        if self.variant != "crossderby":
+            return set()
+        blank_squares = set()
+        # cross derby has blank squares surrounding the corners of the board, 3 each totaling to 12 blank squares
+        corners = [(1, 1), (1, 8), (8, 1), (8, 8)]
+        # for each corner, add all 8 surrounding squares to blank squares, then remove any that are out of bounds
+        for corner in corners:
+            cx, cy = corner
+            for dx in [-1, 0, 1]:
+                for dy in [-1, 0, 1]:
+                    if dx == 0 and dy == 0:
+                        continue
+                    x = cx + dx
+                    y = cy + dy
+                    if 1 <= x <= 8 and 1 <= y <= 8:
+                        blank_squares.add((x, y))
+
+        return blank_squares
+
     def get_moves(self) -> dict[str, set[str]]:
-        if self.variant != "gravitychess":
-            moves = {}
-            for move in self.board.legal_moves:
-                uci_move = move.uci().upper()
-                from_square = uci_move[0:2]
-                to_square = uci_move[2:4]
-                if moves.get(from_square) is None:
-                    moves[from_square] = set()
-                moves[from_square].add(to_square)
-            return moves
-        else:
-            # we're gonna need to do a bit of custom move generation here since gravity chess has different rules
-            # we'll figure out all pseudo-legal moves, then modify them to get their FINAL positions after gravity applies, then check legality on those final positions
-            legal_moves = {}
-            for move in self.board.pseudo_legal_moves:
-                # simulate the move on a copy of the board
-                temp_board = self.board.copy()
-                temp_board.push(move)
-                # apply gravity: for each piece on the board, move it down (to the right) until it hits another piece or the edge of the board, also change move to be the final position after gravity applies, dedup moves as needed
-                pieces_to_move = []
-                for square in chess.SQUARES:
-                    piece = temp_board.piece_at(square)
-                    if piece is not None:
-                        pieces_to_move.append((square, piece))
-                        temp_board.remove_piece_at(square)
-                for square, piece in pieces_to_move:
-                    file = chess.square_file(square)
-                    rank = chess.square_rank(square)
-                    while file < 7:
-                        next_square = chess.square(file + 1, rank)
-                        if temp_board.piece_at(next_square) is not None:
-                            break
-                        file += 1
-                    final_square = chess.square(file, rank)
-                    temp_board.set_piece_at(final_square, piece)
-                # now check if the move is legal on the modified board
-                if not temp_board.is_check():
-                    # move is legal, adjust the move to be the final position after gravity applies
-                    move_file = chess.square_file(move.to_square)
-                    move_rank = chess.square_rank(move.to_square)
-                    while move_file < 7:
-                        next_square = chess.square(move_file + 1, move_rank)
-                        if self.board.piece_at(next_square) is not None:
-                            break
-                        move_file += 1
-                    final_to_square = chess.square(move_file, move_rank)
-                    final_uci = f"{chess.square_name(move.from_square).upper()}{chess.square_name(final_to_square).upper()}"
-                    uci_move = final_uci.upper()
+        match self.variant:
+            case "gravitychess":
+                # we're gonna need to do a bit of custom move generation here since gravity chess has different rules
+                # we'll figure out all pseudo-legal moves, then modify them to get their FINAL positions after gravity applies, then check legality on those final positions
+                legal_moves = {}
+                for move in self.board.pseudo_legal_moves:
+                    # simulate the move on a copy of the board
+                    temp_board = self.board.copy()
+                    temp_board.push(move)
+                    # apply gravity: for each piece on the board, move it down (to the right) until it hits another piece or the edge of the board, also change move to be the final position after gravity applies, dedup moves as needed
+                    pieces_to_move = []
+                    for square in chess.SQUARES:
+                        piece = temp_board.piece_at(square)
+                        if piece is not None:
+                            pieces_to_move.append((square, piece))
+                            temp_board.remove_piece_at(square)
+                    for square, piece in pieces_to_move:
+                        file = chess.square_file(square)
+                        rank = chess.square_rank(square)
+                        while file < 7:
+                            next_square = chess.square(file + 1, rank)
+                            if temp_board.piece_at(next_square) is not None:
+                                break
+                            file += 1
+                        final_square = chess.square(file, rank)
+                        temp_board.set_piece_at(final_square, piece)
+                    # now check if the move is legal on the modified board
+                    if not temp_board.is_check():
+                        # move is legal, adjust the move to be the final position after gravity applies
+                        move_file = chess.square_file(move.to_square)
+                        move_rank = chess.square_rank(move.to_square)
+                        while move_file < 7:
+                            next_square = chess.square(move_file + 1, move_rank)
+                            if self.board.piece_at(next_square) is not None:
+                                break
+                            move_file += 1
+                        final_to_square = chess.square(move_file, move_rank)
+                        final_uci = f"{chess.square_name(move.from_square).upper()}{chess.square_name(final_to_square).upper()}"
+                        uci_move = final_uci.upper()
+                        from_square = uci_move[0:2]
+                        to_square = uci_move[2:4]
+                        if legal_moves.get(from_square) is None:
+                            legal_moves[from_square] = set()
+                        if to_square not in legal_moves[from_square]:
+                            legal_moves[from_square].add(to_square)
+                # remove any moves that result in the piece going immediately to the left of itself (this will cause no net movement after gravity) unless the horizontal position is changed (i.e. captures or vertical moves)
+                new_legal_moves = {}
+                for from_square, to_squares in legal_moves.items():
+                    new_to_squares = set()
+                    from_file = ord(from_square[0]) - ord("A")
+                    from_rank = int(from_square[1]) - 1
+                    for to_square in to_squares:
+                        to_file = ord(to_square[0]) - ord("A")
+                        to_rank = int(to_square[1]) - 1
+                        if to_file != from_file - 1 or to_rank != from_rank:
+                            new_to_squares.add(to_square)
+                    if len(new_to_squares) > 0:
+                        new_legal_moves[from_square] = new_to_squares
+                return new_legal_moves
+            case "crossderby":
+                # filter out any moves leading to blank squares
+                moves = {}
+                for move in self.board.legal_moves:
+                    uci_move = move.uci().upper()
                     from_square = uci_move[0:2]
                     to_square = uci_move[2:4]
-                    if legal_moves.get(from_square) is None:
-                        legal_moves[from_square] = set()
-                    if to_square not in legal_moves[from_square]:
-                        legal_moves[from_square].add(to_square)
-            # remove any moves that result in the piece going immediately to the left of itself (this will cause no net movement after gravity) unless the horizontal position is changed (i.e. captures or vertical moves)
-            new_legal_moves = {}
-            for from_square, to_squares in legal_moves.items():
-                new_to_squares = set()
-                from_file = ord(from_square[0]) - ord("A")
-                from_rank = int(from_square[1]) - 1
-                for to_square in to_squares:
-                    to_file = ord(to_square[0]) - ord("A")
-                    to_rank = int(to_square[1]) - 1
-                    if to_file != from_file - 1 or to_rank != from_rank:
-                        new_to_squares.add(to_square)
-                if len(new_to_squares) > 0:
-                    new_legal_moves[from_square] = new_to_squares
-            return new_legal_moves
+                    to_file = ord(to_square[0]) - ord("A") + 1
+                    to_rank = int(to_square[1])
+                    if (to_file, to_rank) in self.blank_squares():
+                        continue
+                    if moves.get(from_square) is None:
+                        moves[from_square] = set()
+                    moves[from_square].add(to_square)
+                return moves
+            case _:
+                moves = {}
+                for move in self.board.legal_moves:
+                    uci_move = move.uci().upper()
+                    from_square = uci_move[0:2]
+                    to_square = uci_move[2:4]
+                    if moves.get(from_square) is None:
+                        moves[from_square] = set()
+                    moves[from_square].add(to_square)
+                return moves
 
     def legal_move(self, move: chess.Move) -> bool:
         legal_moves = self.get_moves()

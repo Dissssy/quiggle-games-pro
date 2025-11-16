@@ -60,7 +60,6 @@ async def on_ready(event: hikari.StartedEvent) -> None:
         parsed[str(emoji.name)] = f"<:{emoji.name}:{emoji.id}>"
     lib.set_application_emojis(parsed)
     print(f"Successfully loaded {len(emojis)} emojis.")
-    print(lib.application_emoji("quiggle"))
 
 
 @bot.listen(hikari.InteractionCreateEvent)

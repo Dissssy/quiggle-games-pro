@@ -121,71 +121,114 @@ def setup(
                 except ValueError:
                     print("Invalid column in c4_move_ interaction id:", custom_id)
                     return
-                resp = c4_game.make_move(event.interaction.user.id, col, elo_handler)
-                if isinstance(resp, bool):
-                    if resp:
-                        outcome = c4_game.check_outcome()
-                        if outcome is None:
-                            await bot.rest.create_interaction_response(
-                                interaction=event.interaction,
-                                response_type=hikari.ResponseType.MESSAGE_UPDATE,
-                                content=c4_game.content(),
-                                embeds=c4_game.embeds(),
-                                components=c4_game.components(bot),
-                                token=event.interaction.token,
-                            )
-                            return
-                        if isinstance(outcome, lib.Tie):
-                            await bot.rest.create_interaction_response(
-                                interaction=event.interaction,
-                                response_type=hikari.ResponseType.MESSAGE_UPDATE,
-                                content=f"{c4_game.to_empty_header()}The game is a tie!",
-                                embeds=c4_game.embeds(),
-                                components=c4_game.components(bot),
-                                token=event.interaction.token,
-                            )
-                            return
-                        if isinstance(outcome, lib.Win):
-                            await bot.rest.create_interaction_response(
-                                interaction=event.interaction,
-                                response_type=hikari.ResponseType.MESSAGE_UPDATE,
-                                content=f"{c4_game.to_empty_header()}<@{outcome.winner_id}> has won the game!",
-                                embeds=c4_game.embeds(),
-                                components=c4_game.components(bot),
-                                token=event.interaction.token,
-                            )
-                            return
-                        if isinstance(outcome, lib.Forfeit):
-                            await bot.rest.create_interaction_response(
-                                interaction=event.interaction,
-                                response_type=hikari.ResponseType.MESSAGE_UPDATE,
-                                content=f"{c4_game.to_empty_header()}<@{outcome.winner_id}> has won the game by forfeit!",
-                                embeds=c4_game.embeds(),
-                                components=c4_game.components(bot),
-                                token=event.interaction.token,
-                            )
-                            return
-                    else:
-                        await bot.rest.create_interaction_response(
-                            event.interaction,
-                            event.interaction.token,
-                            hikari.ResponseType.MESSAGE_CREATE,
-                            "Invalid move.",
-                            flags=hikari.MessageFlag.EPHEMERAL,
-                        )
+                response = c4_game.make_move(
+                    event.interaction.user.id, col, elo_handler
+                )
+                if isinstance(response, bool) and response:
+                    await bot.rest.create_interaction_response(
+                        interaction=event.interaction,
+                        response_type=hikari.ResponseType.MESSAGE_UPDATE,
+                        content=c4_game.content(),
+                        embeds=c4_game.embeds(),
+                        components=c4_game.components(bot),
+                        token=event.interaction.token,
+                    )
                     return
-                elif isinstance(resp, lib.MaybeEphemeral):
+                elif isinstance(response, elo.Change):
+                    await bot.rest.create_interaction_response(
+                        interaction=event.interaction,
+                        response_type=hikari.ResponseType.MESSAGE_UPDATE,
+                        # content=c4_game.content(),
+                        content=f"{c4_game.to_empty_header()}",
+                        embeds=elo.result_embeds(response) + c4_game.embeds(),
+                        components=c4_game.components(bot),
+                        token=event.interaction.token,
+                    )
+                    return
+                elif isinstance(response, lib.MaybeEphemeral):
                     await bot.rest.create_interaction_response(
                         event.interaction,
                         event.interaction.token,
                         hikari.ResponseType.MESSAGE_CREATE,
-                        resp.message,
-                        flags=hikari.MessageFlag.EPHEMERAL if resp.ephemeral else None,
+                        response.message,
+                        flags=(
+                            hikari.MessageFlag.EPHEMERAL if response.ephemeral else None
+                        ),
                     )
                     return
                 else:
-                    print("Invalid response from make_move:", resp)
+                    await bot.rest.create_interaction_response(
+                        event.interaction,
+                        event.interaction.token,
+                        hikari.ResponseType.MESSAGE_CREATE,
+                        "Invalid move.",
+                        flags=hikari.MessageFlag.EPHEMERAL,
+                    )
                     return
+                # if isinstance(response, bool):
+                #     if response:
+                #         outcome = c4_game.check_outcome()
+                #         if outcome is None:
+                #             await bot.rest.create_interaction_response(
+                #                 interaction=event.interaction,
+                #                 response_type=hikari.ResponseType.MESSAGE_UPDATE,
+                #                 content=c4_game.content(),
+                #                 embeds=c4_game.embeds(),
+                #                 components=c4_game.components(bot),
+                #                 token=event.interaction.token,
+                #             )
+                #             return
+                #         if isinstance(outcome, lib.Tie):
+                #             await bot.rest.create_interaction_response(
+                #                 interaction=event.interaction,
+                #                 response_type=hikari.ResponseType.MESSAGE_UPDATE,
+                #                 content=f"{c4_game.to_empty_header()}The game is a tie!",
+                #                 embeds=c4_game.embeds(),
+                #                 components=c4_game.components(bot),
+                #                 token=event.interaction.token,
+                #             )
+                #             return
+                #         if isinstance(outcome, lib.Win):
+                #             await bot.rest.create_interaction_response(
+                #                 interaction=event.interaction,
+                #                 response_type=hikari.ResponseType.MESSAGE_UPDATE,
+                #                 content=f"{c4_game.to_empty_header()}<@{outcome.winner_id}> has won the game!",
+                #                 embeds=c4_game.embeds(),
+                #                 components=c4_game.components(bot),
+                #                 token=event.interaction.token,
+                #             )
+                #             return
+                #         if isinstance(outcome, lib.Forfeit):
+                #             await bot.rest.create_interaction_response(
+                #                 interaction=event.interaction,
+                #                 response_type=hikari.ResponseType.MESSAGE_UPDATE,
+                #                 content=f"{c4_game.to_empty_header()}<@{outcome.winner_id}> has won the game by forfeit!",
+                #                 embeds=c4_game.embeds(),
+                #                 components=c4_game.components(bot),
+                #                 token=event.interaction.token,
+                #             )
+                #             return
+                #     else:
+                #         await bot.rest.create_interaction_response(
+                #             event.interaction,
+                #             event.interaction.token,
+                #             hikari.ResponseType.MESSAGE_CREATE,
+                #             "Invalid move.",
+                #             flags=hikari.MessageFlag.EPHEMERAL,
+                #         )
+                #     return
+                # elif isinstance(response, lib.MaybeEphemeral):
+                #     await bot.rest.create_interaction_response(
+                #         event.interaction,
+                #         event.interaction.token,
+                #         hikari.ResponseType.MESSAGE_CREATE,
+                #         response.message,
+                #         flags=hikari.MessageFlag.EPHEMERAL if response.ephemeral else None,
+                #     )
+                #     return
+                # else:
+                #     print("Invalid response from make_move:", response)
+                #     return
             elif custom_id == "c4_quiggle":
                 await bot.rest.create_interaction_response(
                     event.interaction,
@@ -229,7 +272,7 @@ class ConnectFourGame:
 
     def make_move(
         self, player: hikari.Snowflake, col: int, elo_handler: elo.EloHandler
-    ) -> bool:
+    ) -> bool | elo.Change:
         if player in lib.admins():
             player = self.current_turn
         if self.current_turn != player:
@@ -246,7 +289,7 @@ class ConnectFourGame:
         )
         outcome = self.check_outcome()
         if outcome is not None:
-            elo_handler.record_outcome(outcome)
+            return elo_handler.record_outcome(outcome)
         return True
 
     def get_all_winning_positions(self) -> list[tuple[int, int]]:

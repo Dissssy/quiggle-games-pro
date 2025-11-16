@@ -150,48 +150,27 @@ def setup(
                         ),
                     )
                     return
+                elif isinstance(response, elo.Change):
+                    await bot.rest.create_interaction_response(
+                        interaction=event.interaction,
+                        response_type=hikari.ResponseType.MESSAGE_UPDATE,
+                        content=game.content(),
+                        embeds=elo.result_embeds(response)
+                        + game.embeds(),  # append game embeds after result embeds
+                        components=game.components(bot),
+                        token=event.interaction.token,
+                    )
+                    return
                 elif isinstance(response, bool) and response:
-                    outcome = game.check_outcome()
-                    if outcome is None:
-                        await bot.rest.create_interaction_response(
-                            interaction=event.interaction,
-                            response_type=hikari.ResponseType.MESSAGE_UPDATE,
-                            content=game.content(),
-                            components=game.components(bot),
-                            embeds=game.embeds(),
-                            token=event.interaction.token,
-                        )
-                        return
-                    if isinstance(outcome, lib.Tie):
-                        await bot.rest.create_interaction_response(
-                            interaction=event.interaction,
-                            response_type=hikari.ResponseType.MESSAGE_UPDATE,
-                            content=f"{game.to_empty_header()}The game is a tie!",
-                            components=game.components(bot),
-                            embeds=game.embeds(),
-                            token=event.interaction.token,
-                        )
-                        return
-                    if isinstance(outcome, lib.Win):
-                        await bot.rest.create_interaction_response(
-                            interaction=event.interaction,
-                            response_type=hikari.ResponseType.MESSAGE_UPDATE,
-                            content=f"{game.to_empty_header()}<@{outcome.winner_id}> has won the game!",
-                            components=game.components(bot),
-                            embeds=game.embeds(),
-                            token=event.interaction.token,
-                        )
-                        return
-                    if isinstance(outcome, lib.Forfeit):
-                        await bot.rest.create_interaction_response(
-                            interaction=event.interaction,
-                            response_type=hikari.ResponseType.MESSAGE_UPDATE,
-                            content=f"{game.to_empty_header()}<@{outcome.winner_id}> has won the game by forfeit!",
-                            components=game.components(bot),
-                            embeds=game.embeds(),
-                            token=event.interaction.token,
-                        )
-                        return
+                    await bot.rest.create_interaction_response(
+                        interaction=event.interaction,
+                        response_type=hikari.ResponseType.MESSAGE_UPDATE,
+                        content=game.content(),
+                        components=game.components(bot),
+                        embeds=game.embeds(),
+                        token=event.interaction.token,
+                    )
+                    return
                 else:
                     await bot.rest.create_interaction_response(
                         event.interaction,
@@ -232,11 +211,11 @@ class Game:
         self.player_2_choice: int | None = None  # 0: Rock, 1: Paper, 2: Scissors
         self.player_1_wins = 0
         self.player_2_wins = 0
-        self.round_history: list[tuple[int, int]] = []
+        self.round_history: list[tuple[int, int, int]] = []
 
     def make_move(
         self, player: hikari.Snowflake, choice: int, elo_handler: elo.EloHandler
-    ) -> bool | lib.MaybeEphemeral:
+    ) -> bool | lib.MaybeEphemeral | elo.Change:
         if player in lib.admins():
             player = self.player_1 if self.player_1_choice is None else self.player_2
         if player != self.player_1 and player != self.player_2:
@@ -272,10 +251,18 @@ class Game:
                     self.player_1_wins += 1
                 else:
                     self.player_2_wins += 1
-            self.round_history.append((self.player_1_choice, self.player_2_choice))
+            last_round_number = (
+                0 if len(self.round_history) == 0 else self.round_history[-1][2]
+            )
+            self.round_history.append(
+                (self.player_1_choice, self.player_2_choice, last_round_number + 1)
+            )
+            # only keep the last 10 rounds
+            if len(self.round_history) > 10:
+                self.round_history = self.round_history[-10:]
             self.player_1_choice = None
             self.player_2_choice = None
-            elo_handler.record_outcome(outcome)
+            return elo_handler.record_outcome(outcome)
         return True
 
     def check_outcome(self) -> lib.Win | lib.Tie | lib.Forfeit | None:
@@ -300,13 +287,13 @@ class Game:
             last_round = self.round_history[-1]
             player_1_last_move = move_map[last_round[0]]["emoji"] + " "
             player_2_last_move = move_map[last_round[1]]["emoji"] + " "
-            if last_round[0] == last_round[1]:
-                outcome = f"The last round was a tie!\n"
-            elif (last_round[0] - last_round[1]) % 3 == 1:
-                outcome = f"<@{self.player_1}> won the last round!\n"
-            else:
-                outcome = f"<@{self.player_2}> won the last round!\n"
-        return f"{header}{outcome}{player_1_last_move}<@{self.player_1}>{"" if self.player_1_choice is None else " ✅"}\nVS.\n{player_2_last_move}<@{self.player_2}>{"" if self.player_2_choice is None else " ✅"}\nMake your move!"
+            # if last_round[0] == last_round[1]:
+            #     outcome = f"The last round was a tie!\n"
+            # elif (last_round[0] - last_round[1]) % 3 == 1:
+            #     outcome = f"<@{self.player_1}> won the last round!\n"
+            # else:
+            #     outcome = f"<@{self.player_2}> won the last round!\n"
+        return f"{header}{outcome}{player_1_last_move}<@{self.player_1}>{"" if self.player_1_choice is None else " ✅"}\nVS.\n{player_2_last_move}<@{self.player_2}>{"" if self.player_2_choice is None else " ✅"}"
 
     def embeds(self) -> list[hikari.Embed]:
         embeds = []
@@ -320,9 +307,9 @@ class Game:
         )
         if self.round_history:
             history_str = ""
-            for i, (p1_move, p2_move) in enumerate(self.round_history, start=1):
+            for p1_move, p2_move, round_number in self.round_history:
                 history_str += (
-                    f"Round {i}: {move_map[p1_move]['emoji']} "
+                    f"Round {round_number}: {move_map[p1_move]['emoji']} "
                     f"vs {move_map[p2_move]['emoji']}\n"
                 )
             embed.add_field(name="Round History", value=history_str, inline=False)
@@ -386,7 +373,18 @@ class Game:
             game.player_2_choice = dict_data["player_2_choice"]
             if game.player_2_choice is not None:
                 game.player_2_choice = int(game.player_2_choice)
-            game.round_history = [tuple(pair) for pair in dict_data["round_history"]]
+            game.round_history = [tuple(triad) for triad in dict_data["round_history"]]
+            # if game.round_history is tuple[int, int] we need to convert to tuple[int, int, int] and truncate to last 10 rounds
+            if (
+                game.round_history
+                and len(game.round_history) != 0
+                and len(game.round_history[0]) == 2
+            ):
+                # add the round numbers
+                new_history = []
+                for i, (p1_move, p2_move) in enumerate(game.round_history, start=1):
+                    new_history.append((p1_move, p2_move, i))
+                game.round_history = new_history[-10:]
             return game
         except Exception:
             return None
