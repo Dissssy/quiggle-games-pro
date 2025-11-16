@@ -1,3 +1,4 @@
+import os
 from attr import dataclass
 import hikari
 import zlib
@@ -5,6 +6,9 @@ import base64
 import json
 import sys
 import datetime
+import logging
+
+LOGGER = logging.getLogger("quiggle-games-pro")
 
 
 class GameInvite:
@@ -250,13 +254,15 @@ application_emojis = {}
 
 def set_application_emojis(emojis: dict[str, str]) -> None:
     global application_emojis
-    print(f"Application emojis set: ", end="")
+    emojis_str = "Application emojis set: "
+    # print(f"Application emojis set: ", end="")
     first = True
     for key, value in emojis.items():
         # print(f"  {key}: {value}")
-        print(f"{', ' if not first else ''}{key}", end="")
+        # print(f"{', ' if not first else ''}{key}", end="")
+        emojis_str += f"{', ' if not first else ''}{key}"
         first = False
-    print()
+    LOGGER.info(emojis_str)
     application_emojis = emojis
 
 
@@ -283,10 +289,21 @@ def get_game_name(game_code: str) -> str:
 
 
 def fallback(name: str) -> str:
-    print(f"Falling back for emoji: {name}")
+    LOGGER.warning(f"Falling back for emoji: {name}")
     return "❌"
 
 
 def get_username(user: hikari.User) -> str:
     # get the pretty username of the user, otherwise fall back to their full actual username
     return user.global_name or user.username
+
+
+def donation_url() -> str:
+    return os.getenv("DONATION_LINK", "https://google.com")
+
+
+def donation_logo_url() -> str:
+    return os.getenv(
+        "DONATION_LOGO_URL",
+        "https://storage.ko-fi.com/cdn/kofi3.png?v=2",
+    )

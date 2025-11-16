@@ -264,10 +264,8 @@ def result_embeds(
 
     embed.set_author(
         name="Match Result and Elo Update",
-        url="https://ko-fi.com/p51_dissy",
-        # icon="https://cdn.discordapp.com/avatars/156533151198478336/654883d7b36cf0b706a06a19581cd5fd.png?size=256",
-        # icon="https://zip.p51.nl/raw/5bc411bd-7995-4323-8c27-3633be7dffa2.png",
-        icon="https://zip.p51.nl/raw/85b61ffc-4788-480e-8f66-8fb2c3f73141.png",
+        url=lib.donation_url(),
+        icon=lib.donation_logo_url(),
     )
 
     return [embed]
